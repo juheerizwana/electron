@@ -2,12 +2,11 @@
 
 import * as electron from 'electron'
 import { EventEmitter } from 'events'
-import { isBuffer, bufferToMeta, BufferMeta, metaToBuffer } from '@electron/internal/common/remote/buffer-utils'
 import objectsRegistry from './objects-registry'
 import { ipcMainInternal } from '../ipc-main-internal'
 import * as guestViewManager from '@electron/internal/browser/guest-view-manager'
 import * as errorUtils from '@electron/internal/common/error-utils'
-import { isPromise } from '@electron/internal/common/remote/is-promise'
+import { isPromise, isSerializable } from '@electron/internal/common/remote/type-utils'
 
 const v8Util = process.electronBinding('v8_util')
 const eventBinding = process.electronBinding('event')
@@ -105,16 +104,13 @@ type MetaType = {
   value: any,
 } | {
   type: 'buffer',
-  value: BufferMeta,
+  value: Uint8Array,
 } | {
   type: 'array',
   members: MetaType[]
 } | {
   type: 'error',
   members: ObjectMember[]
-} | {
-  type: 'date',
-  value: number
 } | {
   type: 'promise',
   then: MetaType
@@ -128,14 +124,14 @@ const valueToMeta = function (sender: electron.WebContents, contextId: string, v
     // Recognize certain types of objects.
     if (value === null) {
       type = 'value'
-    } else if (isBuffer(value)) {
+    } else if (value instanceof Buffer) {
       type = 'buffer'
     } else if (Array.isArray(value)) {
       type = 'array'
     } else if (value instanceof Error) {
       type = 'error'
-    } else if (value instanceof Date) {
-      type = 'date'
+    } else if (isSerializable(value)) {
+      type = 'value'
     } else if (isPromise(value)) {
       type = 'promise'
     } else if (hasProp.call(value, 'callee') && value.length != null) {
@@ -165,7 +161,7 @@ const valueToMeta = function (sender: electron.WebContents, contextId: string, v
       proto: getObjectPrototype(value)
     }
   } else if (type === 'buffer') {
-    return { type, value: bufferToMeta(value) }
+    return { type, value }
   } else if (type === 'promise') {
     // Add default handler to prevent unhandled rejections in main process
     // Instead they should appear in the renderer process
@@ -186,8 +182,6 @@ const valueToMeta = function (sender: electron.WebContents, contextId: string, v
       value: value.name
     })
     return { type, members }
-  } else if (type === 'date') {
-    return { type, value: value.getTime() }
   } else {
     return {
       type: 'value',
@@ -253,7 +247,7 @@ type MetaTypeFromRenderer = {
   value: MetaTypeFromRenderer[]
 } | {
   type: 'buffer',
-  value: BufferMeta
+  value: Uint8Array
 } | {
   type: 'date',
   value: number
@@ -285,9 +279,7 @@ const unwrapArgs = function (sender: electron.WebContents, frameId: number, cont
       case 'array':
         return unwrapArgs(sender, frameId, contextId, meta.value)
       case 'buffer':
-        return metaToBuffer(meta.value)
-      case 'date':
-        return new Date(meta.value)
+        return Buffer.from(meta.value.buffer, meta.value.byteOffset, meta.value.byteLength)
       case 'promise':
         return Promise.resolve({
           then: metaToValue(meta.then)

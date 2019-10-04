@@ -10,3 +10,16 @@ export function isPromise (val: any) {
     val.constructor.resolve instanceof Function
   )
 }
+
+const serializableTypes = [
+  Boolean,
+  Number,
+  String,
+  Date,
+  RegExp,
+  ArrayBuffer
+]
+
+export function isSerializable (value: any) {
+  return ArrayBuffer.isView(value) || serializableTypes.some(type => value instanceof type)
+}
